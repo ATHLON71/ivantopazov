@@ -30,203 +30,116 @@ class Catalog extends CI_Controller  {
         }
     }
     
-    // Серверное извлечение всех алиасов из URL
-    private function ExtractTree(){ 
-        
-        $argList = func_get_args();
-        $arg_list = ( $argList !== false ) ? $argList : array();
-        $item = ( count( $arg_list[1] ) > 0 ) ? $arg_list[1][(count( $arg_list[1] ) - 1)] : $arg_list[0];
-        $tree = array();
-        $tree[] = $arg_list[0];
-        foreach( $arg_list[1] as $v ) $tree[] = $v;
-        
-        // Передача алиасов и получение информации и инструкций...
-        $logicData = $this->getLogicData( $tree, false );
-        
-        if( $logicData['error404'] !== true ){
-            if( !empty( $logicData['item']) ){
-                $variable = 'view_'.$logicData['method'];
-                self::$variable( $logicData );
-            }
-        }else{            
-            redirect('/catalog');
-        }
-        
-    }    
-    
-    // Получение информации и инструкций [ сервер / json ]
-    public function getLogicData( $tree = array(), $j = true ){
-        
-        $tree = ( isset( $this->post['tree'] ) ) ? $this->post['tree'] : $tree ;        
-        $r = [ 
-            'item' => [],
-            'error404' => true, 
-            'brb' => [
-                [ 
-                    'name' => 'Каталог', 
-                    'link' => '/catalog' 
-                ]
-            ]
-        ];
-        $lastAliase = $tree[count($tree)-1];
-        
-        if( count( $tree ) > 0 ){
-            
-            $tovar = $this->mdl_product->queryData([
-                'return_type' => 'ARR2',
-                'where' => [
-                    'method' => 'AND',
-                    'set' => [[
-                        'item' => 'aliase',
-                        'value' => $lastAliase
-                    ]]
-                ],
-                'labels' => ['id', 'aliase', 'title', 'modules'],
-                'module' => true,
-                'modules' => [[
-                    'module_name' => 'linkPath', 
-                    'result_item' => 'linkPath', 
-                    'option' => []
-                ]]
-            ]);
-                        
-            $link_bs = '/catalog';
-            foreach( $tree as $v ){
-                $link_bs .= '/'.$v;
-            }
-            
-            if( count( $tovar ) > 0 ){
-                array_pop( $tree );
-                $r['method'] = 'product';
-                $r['item'] = $tovar[0];
-                $r['error404'] = ( $link_bs === $r['item']['modules']['linkPath'] ) ? false : true;                
-            }else{
-                
-                $category = $this->mdl_category->queryData([
-                    'return_type' => 'ARR2',
-                    'where' => [
-                        'method' => 'AND',
-                        'set' => [
-                            ['item' => 'aliase', 'value' => $lastAliase]
-                        ]
-                    ],
-                    'labels' => ['id', 'aliase', 'name', 'desription']
-                ]);
-                
-                if( count( $category ) > 0 ){
-                    array_pop( $tree );
-                    $r['method'] = 'category';
-                    $r['item'] = $category[0];                    
-                    $link_par = $this->mdl_category->getParentCatsTree( [$category[0]['id']] );
-                    $r['error404'] = ( $link_bs === $link_par[$category[0]['id']] ) ? false : true;
-                }
-            }
-            
-            if( count( $tree ) > 0 ){
-                
-                
-                $cats = $this->mdl_category->queryData([
-                    'return_type' => 'ARR2',
-                    'in' => [
-                        'method' => 'AND',
-                        'set' => [
-                            [ 'item' => 'aliase', 'values' => $tree ]
-                        ]
-                    ],
-                    'labels' => false
-                ]);
-                
-                $link = '/catalog'; $par_id = 0; 
-                foreach( $cats as $k => $v ){
-                    
-                    if( $par_id == $v['parent_id'] ){
-                        $par_id = $v['id'];
-                        
-                        $link .= '/' . $v['aliase'];
-                        
-                        $r['brb'][] = array(
-                            'name' => $v['name'],
-                            'link' => $link
-                        ); 
-                        
-                    }                 
-                }
-            }
-        }
-        
-        if( $j === true ){
-            $this->mdl_helper->__json( $r );
-        }else{
-            return $r;
-        }
-        
-    }
-    
-    // Вывести главную страницу каталога
-    public function index(){
-    
-        $start = microtime(true); 
-         
-		$title = 'Ювелирный каталог';
+	// Вывести главную страницу каталога
+	public function index()
+	{
+		
+		$start = microtime(true);
+
 		$page_var = 'catalog';
-        
-        $this->mdl_tpl->view( 'templates/doctype_catalog.html' , array(
-        
-            'title' => $title,
-            'addons_folder' => $this->mdl_stores->getСonfigFile('addons_folder'),
-            'config_styles_path' => $this->mdl_stores->getСonfigFile('config_styles_path'), 
-            'config_images_path' => $this->mdl_stores->getСonfigFile('config_images_path'), 
+
+//		$getData = $this->getCategoryHome();
+		$getData = $this->getCatData();
+
+		$title = (!isset($getData['setFilters']['category']) ? 'Каталог ювелирных изделий Иван Топазов - цены и фото на золотые украшения со скидкой в Москве' : '') . $getData['filterTitle'];
+		$h1 = (!isset($getData['setFilters']['category']) ? 'Ювелирные изделия в интернет-магазине - каталог украшений' : '') . $getData['filterTitle'];
+		$title = mb_strtoupper(mb_substr($title, 0, 1)) . mb_substr($title, 1);
+
+		// Если нет товаров, ставим заглушку
+		if (count($getData["products"]) < 1) {
+			$descr = "<p style='font-size:18px;font-weight:bold;'>
+				Не нашли, что искали? 
+				Закажите <a href='#' data-toggle='modal' data-target='#modal_callback' style='color:#337ab7;'>звонок консультанта</a> или напишите в чат - возможно, на сайте идут работы.
+				Приносим свои извинения за неудобства!
+			</p>";
+		} else $descr = "";
+
+		$this->mdl_tpl->view('templates/doctype_catalog.html', [
+
+			'title' => $title,
+			'addons_folder' => $this->mdl_stores->getСonfigFile('addons_folder'),
+			'config_styles_path' => $this->mdl_stores->getСonfigFile('config_styles_path'),
+			'config_images_path' => $this->mdl_stores->getСonfigFile('config_images_path'),
+
+			'seo' => $this->mdl_tpl->view('snipets/seo_tools.html', [
+				'mk' => (!empty($this->store_info['seo_keys'])) ? $this->store_info['seo_keys'] : '',
+				//'md' => (!empty($this->store_info['seo_desc'])) ? $this->store_info['seo_desc'] : '',
+				'md' => 'Золотые украшения по низким ценам. Посмотрите каталог с фото и закажите бесплатную доставку. Покупка после примерки. Скидки на ювелирные изделия из золота.',
+			], true),
+
+			'navTop' => $this->mdl_tpl->view('snipets/navTop.html', [
+				'store' => $this->store_info,
+				'active' => 'home',
+				'config_images_path' => $this->mdl_stores->getСonfigFile('config_images_path'),
+			], true),
+
+			'header' => $this->mdl_tpl->view('snipets/header.html', [
+			
+			    'filter' => 1, 
+				'title' => '',
+				'store' => $this->store_info,
+				'config_images_path' => $this->mdl_stores->getСonfigFile('config_images_path'),
+			], true),
+
+			'navMenu' => $this->mdl_tpl->view('snipets/navMenu.html', [
+				'store' => $this->store_info,
+				'active' => 'home',
+				'itemsTree' => $this->mdl_category->getTreeMenu(),
+				'config_images_path' => $this->mdl_stores->getСonfigFile('config_images_path'),
+			], true),
+
+			'content' => $this->mdl_tpl->view('pages/catalog/home.html', [
+				'blocks' => $this->mdl_tpl->view('pages/catalog/filters/items.html', [
+					'items' => $getData['filter'],
+					'price' => $getData['cena'],
+					'weight' => $getData['weight'],
+				], true),
+				'textSearch' => $getData['textSearch'],
+				'sort' => $getData['sort'],
+				'header_title' => 'Ювелирные изделия в интернет-магазине - каталог украшений с ценами.',
+				'text' => 'Иван Топазов - это более 50 000 ювелирных украшений, доступных для для покупки онлайн и в сети магазинов золота. Найдите для себя подходящие золотые кольца, серьги браслеты подвески и другие изделия. Широкий выбор классических и дизайнерских украшений для женщин, мужчин и детей. ',
+				'collections' => $this->mdl_tpl->view('pages/catalog/category_view_collections.html', [
+					'items' => $getData['collections'],
+				], true),
+				'products' => $this->mdl_tpl->view('pages/catalog/category_view_products.html', [
+					'items' => $getData['products'],
+				], true),
+				'pagination' => $getData['products_pag'],
+				'description' => $descr,
+			], true),
             
-            'seo' => $this->mdl_tpl->view('snipets/seo_tools.html',array(
-                'mk' => ( !empty( $this->store_info['seo_keys'] ) ) ? $this->store_info['seo_keys'] : '',
-                'md' => ( !empty( $this->store_info['seo_desc'] ) ) ? $this->store_info['seo_desc'] : ''
-            ), true),
-            
-            'navTop' => $this->mdl_tpl->view('snipets/navTop.html',array(
-                'store' => $this->store_info,
-                'active' => 'home',
-                'config_images_path' => $this->mdl_stores->getСonfigFile('config_images_path')
-            ),true),
-            
-            'header' => $this->mdl_tpl->view('snipets/header.html',array(
-                'store' => $this->store_info,
-                'config_images_path' => $this->mdl_stores->getСonfigFile('config_images_path')
-            ),true),
-            
-            'navMenu' => $this->mdl_tpl->view('snipets/navMenu.html',array(
-                'store' => $this->store_info,
-                'active' => 'home',
-                'itemsTree' => $this->mdl_category->getTreeMenu(),
-                'config_images_path' => $this->mdl_stores->getСonfigFile('config_images_path')
-            ),true),
-            
-            'content' => $this->mdl_tpl->view('pages/catalog/home_razdels.html',array(
-                'rasdels' => $this->mdl_tpl->view('pages/catalog/category_view_razdels.html',array(   
-                    'items' => $this->getCategoryHome( false )
-                ), true ),
-            ),true),
-            
-            'footer' => $this->mdl_tpl->view('snipets/footer.html',array(
-                'config_images_path' => $this->mdl_stores->getСonfigFile('config_images_path')
-            ), true),
-            
-            'load' => $this->mdl_tpl->view('snipets/load.html',array(
-                'addons_folder' => $this->mdl_stores->getСonfigFile('addons_folder'),
-                'utmLabels' => $this->mdl_tpl->view('snipets/utmLabels.html', $this->mdl_seo->utmLabels( $this->get ), true )
-            ),true),
-            
-            'resorses' => $this->mdl_tpl->view('resorses/catalog/cats_head.html',array(
-                'addons_folder' => $this->mdl_stores->getСonfigFile('addons_folder'),
-                'config_styles_path' => $this->mdl_stores->getСonfigFile('config_styles_path'),
-                'config_scripts_path' => $this->mdl_stores->getСonfigFile('config_scripts_path')
-            ),true)
-            
-        ), false);
-        
-       // echo '<p style="background: yellow none repeat scroll 0% 0%; margin: 20px 0px 0px; position: fixed; bottom: 0px;">Время выполнения скрипта: '.(microtime(true) - $start).' сек.</p>'; 
-        
-        
-    }
+            'h1Catalog' => $this->mdl_tpl->view('snipets/h1Catalog.html',array(
+				'h1' => 'Ювелирные изделия в интернет-магазине - каталог украшений с ценами.',
+				'text' => 'Иван Топазов - это более 50 000 ювелирных украшений, доступных для для покупки онлайн и в сети магазинов золота. Найдите для себя подходящие золотые кольца, серьги браслеты подвески и другие изделия. Широкий выбор классических и дизайнерских украшений для женщин, мужчин и детей. '
+			),true), 
+			   
+            'h2Catalog' => $this->mdl_tpl->view('snipets/h2Catalog.html',array(
+				'h2' => 'Купите золотые украшения со скидкой до 40%!',
+				'text' => 'Изделия с драгоценными камнями по самым доступным ценам. Мы работаем напрямую с производителями, а также даем огромные скидки за счет высоких онлайн-продаж. Подберите украшение для себя или в подарок близкому человеку. Обратитесь к нашему консультанту, и она расскажет вам о действующих акциях и горячих предложениях.',
+				'h2Second' => 'Цены на украшения из золота',
+				'textSecond' => 'Высочайшее качество изделий из драгоценных металлов. На ваш выбор изделия из 585, 750 и 375 пробы с драгоценными и полудрагоценными камнями: бриллианты, фианиты, жемчуг, топазы, сапфиры, рубины, гранаты, изумруды и другие вставки. Для вас доступны классические и дизайнерские кольца и серьги от ведущих брендов ювелирной индустрии. Цены на золотые украшения начинаются от 1500 рублей. Действует система скидок, обращайтесь за подробностями к консультанту.'
+			),true), 
+			
+			'footer' => $this->mdl_tpl->view('snipets/footer.html', [
+				'config_images_path' => $this->mdl_stores->getСonfigFile('config_images_path'),
+			], true),
+
+			'load' => $this->mdl_tpl->view('snipets/load.html', [
+				'addons_folder' => $this->mdl_stores->getСonfigFile('addons_folder'),
+				'utmLabels' => $this->mdl_tpl->view('snipets/utmLabels.html', $this->mdl_seo->utmLabels($this->get), true),
+			], true),
+
+			'resorses' => $this->mdl_tpl->view('resorses/catalog/cats_head.html', [
+				'addons_folder' => $this->mdl_stores->getСonfigFile('addons_folder'),
+				'config_styles_path' => $this->mdl_stores->getСonfigFile('config_styles_path'),
+				'config_scripts_path' => $this->mdl_stores->getСonfigFile('config_scripts_path'),
+			], true),
+
+		], false);
+
+		// echo '<p style="background: yellow none repeat scroll 0% 0%; margin: 20px 0px 0px; position: fixed; bottom: 0px;">Время выполнения скрипта: '.(microtime(true) - $start).' сек.</p>';
+
+	}
     
     // Получить данные для главной страницы
     public function getCategoryHome( $j = true ){
